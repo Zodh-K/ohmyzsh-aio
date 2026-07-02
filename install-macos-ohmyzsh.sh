@@ -20,6 +20,45 @@ ensure_command() {
   command -v "$1" >/dev/null 2>&1 || fail "Missing command: $1"
 }
 
+load_homebrew_env() {
+  if command -v brew >/dev/null 2>&1; then
+    return 0
+  elif [[ -x /opt/homebrew/bin/brew ]]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [[ -x /usr/local/bin/brew ]]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
+}
+
+ensure_curl_available() {
+  command -v curl >/dev/null 2>&1 || fail "curl is required to download Homebrew, fonts, and installer resources."
+}
+
+git_is_usable() {
+  command -v git >/dev/null 2>&1 && git --version >/dev/null 2>&1
+}
+
+preflight_checks() {
+  require_macos
+  ensure_curl_available
+  load_homebrew_env
+
+  if command -v brew >/dev/null 2>&1; then
+    ok "Homebrew is available: $(brew --version | head -n 1)"
+  else
+    warn "Homebrew is not installed or not in PATH. The script will install it before running brew commands."
+  fi
+
+  if git_is_usable; then
+    ok "Git is available: $(git --version)"
+  else
+    warn "Git is not ready. The script will install Git with Homebrew before cloning repositories."
+    warn "If macOS opens a Command Line Tools installer, finish it and rerun this script."
+  fi
+
+  command -v zsh >/dev/null 2>&1 && ok "zsh is available: $(zsh --version)" || fail "zsh is required but was not found."
+}
+
 confirm() {
   local prompt="${1:-Continue?}"
   local answer
@@ -44,6 +83,9 @@ clone_or_update() {
 
 install_homebrew() {
   require_macos
+  ensure_curl_available
+  load_homebrew_env
+
   if command -v brew >/dev/null 2>&1; then
     ok "Homebrew is already installed: $(brew --version | head -n 1)"
     repair_homebrew_share_permissions
@@ -53,11 +95,7 @@ install_homebrew() {
   info "Installing Homebrew. macOS may ask for your password or Command Line Tools confirmation."
   NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-  if [[ -x /opt/homebrew/bin/brew ]]; then
-    eval "$(/opt/homebrew/bin/brew shellenv)"
-  elif [[ -x /usr/local/bin/brew ]]; then
-    eval "$(/usr/local/bin/brew shellenv)"
-  fi
+  load_homebrew_env
 
   command -v brew >/dev/null 2>&1 || fail "Homebrew installed, but brew is not available in PATH. Open a new terminal and retry."
   repair_homebrew_share_permissions
@@ -65,6 +103,7 @@ install_homebrew() {
 }
 
 repair_homebrew_share_permissions() {
+  load_homebrew_env
   command -v brew >/dev/null 2>&1 || return 0
 
   local prefix
@@ -107,6 +146,7 @@ repair_homebrew_share_permissions() {
 }
 
 ensure_homebrew_share_writable() {
+  load_homebrew_env
   command -v brew >/dev/null 2>&1 || return 0
 
   local share_dir
@@ -116,14 +156,35 @@ ensure_homebrew_share_writable() {
   fi
 }
 
-install_node_and_asar() {
+brew_install_if_missing() {
+  local formula="$1"
   install_homebrew
   repair_homebrew_share_permissions
   ensure_homebrew_share_writable
-  info "Installing Node.js with Homebrew."
-  brew install node
-  info "Installing autojump with Homebrew."
-  brew install autojump
+
+  if brew list --versions "${formula}" >/dev/null 2>&1; then
+    ok "${formula} is already installed."
+  else
+    info "Installing ${formula} with Homebrew."
+    brew install "${formula}"
+  fi
+}
+
+ensure_git_available() {
+  if git_is_usable; then
+    ok "Git is available: $(git --version)"
+    return
+  fi
+
+  warn "Git is not usable yet. Installing Git with Homebrew."
+  brew_install_if_missing git
+  hash -r 2>/dev/null || true
+  git_is_usable || fail "Git is still unavailable. If macOS is installing Command Line Tools, finish that installer and rerun this script."
+}
+
+install_node_and_asar() {
+  brew_install_if_missing node
+  brew_install_if_missing autojump
   info "Installing @electron/asar globally."
   npm install -g @electron/asar
   ok "Node.js, npm, @electron/asar, and autojump are ready."
@@ -131,7 +192,7 @@ install_node_and_asar() {
 
 install_oh_my_zsh() {
   require_macos
-  ensure_command git
+  ensure_git_available
 
   clone_or_update "https://github.com/ohmyzsh/ohmyzsh.git" "${OH_MY_ZSH_DIR}"
   clone_or_update "https://github.com/romkatv/powerlevel10k.git" "${P10K_DIR}"
@@ -144,7 +205,7 @@ install_oh_my_zsh() {
 
 install_fonts() {
   require_macos
-  ensure_command curl
+  ensure_curl_available
   mkdir -p "${FONT_DIR}"
 
   local base="https://github.com/romkatv/powerlevel10k-media/raw/master"
@@ -288,6 +349,7 @@ run_p10k_configure() {
 }
 
 full_install() {
+  preflight_checks
   install_node_and_asar
   install_oh_my_zsh
   install_fonts
@@ -304,6 +366,7 @@ full_install() {
 }
 
 show_status() {
+  load_homebrew_env
   printf '\nCurrent status:\n'
   command -v brew >/dev/null 2>&1 && brew --version | head -n 1 || echo "Homebrew: not installed"
   command -v node >/dev/null 2>&1 && node --version || echo "Node.js: not installed"
@@ -335,6 +398,7 @@ macOS Oh My Zsh bootstrap
 6) Run Powerlevel10k configuration wizard
 7) Show install status
 8) Repair Homebrew share permissions
+9) Run preflight checks
 0) Exit
 
 MENU
@@ -354,6 +418,7 @@ main_menu() {
       6) run_p10k_configure ;;
       7) show_status ;;
       8) repair_homebrew_share_permissions ;;
+      9) preflight_checks ;;
       0) exit 0 ;;
       *) warn "Unknown option: ${choice}" ;;
     esac
@@ -368,10 +433,11 @@ case "${1:-menu}" in
   zshrc) configure_zshrc ;;
   p10k) run_p10k_configure ;;
   brew-permissions) repair_homebrew_share_permissions ;;
+  preflight) preflight_checks ;;
   status) show_status ;;
   menu) main_menu ;;
   -h|--help|help)
-    echo "Usage: $0 [menu|full|brew-node-asar|ohmyzsh|fonts|zshrc|p10k|brew-permissions|status]"
+    echo "Usage: $0 [menu|full|brew-node-asar|ohmyzsh|fonts|zshrc|p10k|brew-permissions|preflight|status]"
     ;;
   *)
     fail "Unknown command: $1. Run '$0 --help'."

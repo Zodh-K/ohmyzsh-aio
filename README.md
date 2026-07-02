@@ -5,7 +5,9 @@
 ## 能做什么
 
 - 安装 Homebrew
+- 运行 macOS、curl、Homebrew、Git、zsh 预检
 - 检查并修复 Homebrew `share` 目录权限
+- 如果 Git 不可用，通过 Homebrew 自动安装 Git
 - 通过 Homebrew 安装 Node.js 和 npm
 - 通过 npm 全局安装 `@electron/asar`
 - 通过 Homebrew 安装 `autojump`
@@ -51,6 +53,7 @@ chmod +x install-macos-ohmyzsh.sh
 6) 运行 Powerlevel10k 配置向导
 7) 查看安装状态
 8) 修复 Homebrew share 权限
+9) 运行预检
 0) 退出
 ```
 
@@ -70,6 +73,8 @@ chmod +x install-macos-ohmyzsh.sh
 ## 注意事项
 
 - 首次安装 Homebrew 时，macOS 可能会要求输入开机密码，或弹出 Command Line Tools 安装确认。
+- 如果 Homebrew 已经安装但还没进入 PATH，脚本会自动加载 `/opt/homebrew/bin/brew` 或 `/usr/local/bin/brew`。
+- 如果 Git 不可用，脚本会先确保 Homebrew 可用，再通过 Homebrew 安装 Git，然后继续克隆 Oh My Zsh 和插件仓库。
 - 脚本会在安装 Homebrew 后、执行 `brew install node` 前检查 Homebrew 的 `share` 目录是否可写。如果遇到 `/opt/homebrew/share` 或 `/usr/local/share` 权限问题，会提示修复；如果没有完成修复，脚本会先停止，避免继续执行后遇到 brew 权限报错。
 - 脚本会备份原来的 `~/.zshrc`，备份文件格式为 `~/.zshrc.backup.YYYYMMDDHHMMSS`。
 - 修改默认 shell 时会询问确认，并可能要求输入 macOS 密码。
