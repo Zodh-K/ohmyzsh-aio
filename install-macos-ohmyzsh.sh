@@ -247,7 +247,10 @@ install_homebrew() {
 
 repair_homebrew_share_permissions() {
   load_homebrew_env
-  command -v brew >/dev/null 2>&1 || return 0
+  if ! command -v brew >/dev/null 2>&1; then
+    repair_zsh_completion_permissions
+    return 0
+  fi
 
   local prefix
   prefix="$(brew --prefix)"
@@ -286,6 +289,63 @@ repair_homebrew_share_permissions() {
   }
 
   [[ -w "${share_dir}" ]] && ok "Homebrew share directory is writable."
+  repair_zsh_completion_permissions
+}
+
+repair_zsh_completion_permissions() {
+  command -v zsh >/dev/null 2>&1 || return 0
+
+  local prefix=""
+  local current_user
+  local insecure_dirs=()
+  local dir
+  current_user="$(id -un)"
+
+  load_homebrew_env
+  if command -v brew >/dev/null 2>&1; then
+    prefix="$(brew --prefix)"
+  fi
+
+  while IFS= read -r dir; do
+    [[ -n "${dir}" ]] || continue
+    insecure_dirs+=("${dir}")
+  done < <(zsh -fc 'autoload -Uz compaudit; compaudit' 2>/dev/null || true)
+
+  if [[ "${#insecure_dirs[@]}" -eq 0 ]]; then
+    ok "zsh completion directories are secure."
+    return 0
+  fi
+
+  warn "Found insecure zsh completion directories. Repairing permissions."
+  for dir in "${insecure_dirs[@]}"; do
+    [[ -e "${dir}" ]] || continue
+    case "${dir}" in
+      "${prefix}/share/zsh"|\
+      "${prefix}/share/zsh/"*|\
+      /opt/homebrew/share/zsh|\
+      /opt/homebrew/share/zsh/*|\
+      /usr/local/share/zsh|\
+      /usr/local/share/zsh/*|\
+      "${OH_MY_ZSH_DIR}"|\
+      "${OH_MY_ZSH_DIR}/"*|\
+      "${HOME}/.zsh"|\
+      "${HOME}/.zsh/"*)
+        if [[ ! -O "${dir}" ]]; then
+          sudo chown -R "${current_user}:admin" "${dir}" || warn "Could not change owner for ${dir}"
+        fi
+        chmod -R go-w "${dir}" 2>/dev/null || sudo chmod -R go-w "${dir}" || warn "Could not remove group/other write permission from ${dir}"
+        ;;
+      *)
+        warn "Skipping unmanaged insecure directory: ${dir}"
+        ;;
+    esac
+  done
+
+  if zsh -fc 'autoload -Uz compaudit; compaudit' >/dev/null 2>&1; then
+    ok "zsh completion permissions repaired."
+  else
+    warn "Some zsh completion directories may still be insecure. Run 'compaudit' for details."
+  fi
 }
 
 ensure_homebrew_share_writable() {
@@ -489,6 +549,7 @@ repair_zshrc() {
   require_macos
   warn "This will back up the current ~/.zshrc and regenerate a fixed Oh My Zsh configuration."
   configure_zshrc
+  repair_zsh_completion_permissions
   ok "Existing users are repaired. Open a new terminal or run: source ~/.zshrc"
 }
 
@@ -541,6 +602,7 @@ set_default_shell() {
 
 run_p10k_configure() {
   configure_zshrc
+  repair_zsh_completion_permissions
   info "Starting Powerlevel10k configuration wizard."
   info "Choose the style you like in the prompts that follow."
   zsh -ic 'command -v p10k >/dev/null 2>&1 || source "${ZSH:-$HOME/.oh-my-zsh}/custom/themes/powerlevel10k/powerlevel10k.zsh-theme"; p10k configure'
@@ -552,6 +614,7 @@ full_install() {
   install_oh_my_zsh
   install_fonts
   configure_zshrc
+  repair_zsh_completion_permissions
   set_default_shell
 
   if confirm "Launch Powerlevel10k configuration wizard now?"; then
@@ -586,6 +649,7 @@ show_status() {
   if [[ -f "${ZSHRC}" ]]; then
     zsh -n "${ZSHRC}" >/dev/null 2>&1 && echo ".zshrc syntax: ok" || echo ".zshrc syntax: broken, run './install-macos-ohmyzsh.sh repair-zshrc'"
   fi
+  zsh -fc 'autoload -Uz compaudit; compaudit' >/dev/null 2>&1 && echo "zsh compaudit: ok" || echo "zsh compaudit: insecure directories, run './install-macos-ohmyzsh.sh brew-permissions'"
   printf '\n'
 }
 
@@ -601,7 +665,7 @@ macOS Oh My Zsh 一键初始化
 5) 配置 ~/.zshrc
 6) 运行 Powerlevel10k 配置向导
 7) 查看安装状态
-8) 修复 Homebrew share 权限
+8) 修复 Homebrew share / zsh compaudit 权限
 9) 运行预检
 10) 验证国内镜像/代理
 11) 修复已安装用户的 ~/.zshrc

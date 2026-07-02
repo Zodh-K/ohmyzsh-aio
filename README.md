@@ -53,7 +53,7 @@ chmod +x install-macos-ohmyzsh.sh
 5) 配置 ~/.zshrc
 6) 运行 Powerlevel10k 配置向导
 7) 查看安装状态
-8) 修复 Homebrew share 权限
+8) 修复 Homebrew share / zsh compaudit 权限
 9) 运行预检
 10) 验证国内镜像/代理
 11) 修复已安装用户的 ~/.zshrc
@@ -102,13 +102,15 @@ p10k configure
 source ~/.zshrc
 ```
 
-## 单独修复 Homebrew share 权限
+## 单独修复 Homebrew share 和 zsh compaudit 权限
 
 如果之后单独使用 Homebrew 时遇到类似 `share is not writable`、`/opt/homebrew/share` 或 `/usr/local/share` 权限错误，可以执行：
 
 ```bash
 ./install-macos-ohmyzsh.sh brew-permissions
 ```
+
+如果初次打开 zsh 时提示 `zsh compinit: insecure directories`，也可以执行同一个命令。脚本会检查 `compaudit` 报出的目录，并修复 Homebrew、Oh My Zsh 和用户补全目录中常见的不安全权限。
 
 ## 国内网络模式
 
