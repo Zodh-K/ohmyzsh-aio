@@ -56,6 +56,7 @@ chmod +x install-macos-ohmyzsh.sh
 8) 修复 Homebrew share 权限
 9) 运行预检
 10) 验证国内镜像/代理
+11) 修复已安装用户的 ~/.zshrc
 0) 退出
 ```
 
@@ -85,6 +86,20 @@ chmod +x install-macos-ohmyzsh.sh
 
 ```bash
 p10k configure
+```
+
+## 修复已安装用户的 .zshrc
+
+如果已经运行过旧版本脚本，打开终端时出现插件名被当成命令执行、`.zshrc` 解析错误，或 `p10k: command not found`，请更新到最新脚本后执行：
+
+```bash
+./install-macos-ohmyzsh.sh repair-zshrc
+```
+
+脚本会先备份当前 `~/.zshrc`，再重新生成修复后的 Oh My Zsh 配置。修复后打开新终端，或执行：
+
+```bash
+source ~/.zshrc
 ```
 
 ## 单独修复 Homebrew share 权限

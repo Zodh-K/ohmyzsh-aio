@@ -427,14 +427,9 @@ configure_zshrc() {
     info "Backed up existing .zshrc to ${backup}"
   fi
 
-  cp "${OH_MY_ZSH_DIR}/templates/zshrc.zsh-template" "${ZSHRC}"
-
-  /usr/bin/perl -0pi -e 's/ZSH_THEME="[^"]*"/ZSH_THEME="powerlevel10k\/powerlevel10k"/' "${ZSHRC}"
-  /usr/bin/perl -0pi -e 's/(ZSH_THEME="powerlevel10k\/powerlevel10k"\n)/$1\n# 指定终端标题\nDISABLE_AUTO_TITLE="true"\n/' "${ZSHRC}"
-  /usr/bin/perl -0pi -e 's/plugins=\([^)]+\)/plugins=(\n  git\n  autojump\n  zsh-autosuggestions\n  zsh-syntax-highlighting\n  zsh-completions\n)/s' "${ZSHRC}"
-
   local tmp_zshrc
   tmp_zshrc="$(mktemp)"
+
   cat >"${tmp_zshrc}" <<'ZSHRC_TOP'
 # Powerlevel10k instant prompt. Keep this at the top of ~/.zshrc when customizing later.
 if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
@@ -442,7 +437,11 @@ if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]
 fi
 
 ZSHRC_TOP
-  cat "${ZSHRC}" >>"${tmp_zshrc}"
+  /usr/bin/perl -0pe '
+    s/ZSH_THEME="[^"]*"/ZSH_THEME="powerlevel10k\/powerlevel10k"/;
+    s/# DISABLE_AUTO_TITLE="true"/DISABLE_AUTO_TITLE="true"/;
+    s/^plugins=\([^)]*\)/plugins=(\n  git\n  autojump\n  zsh-autosuggestions\n  zsh-syntax-highlighting\n  zsh-completions\n)/m;
+  ' "${OH_MY_ZSH_DIR}/templates/zshrc.zsh-template" >>"${tmp_zshrc}"
   cat >>"${tmp_zshrc}" <<'ZSHRC_BOTTOM'
 
 # Homebrew environment for Apple Silicon and Intel Macs.
@@ -474,10 +473,23 @@ alias qm="sudo codesign --force --deep --sign -"
 [ -f /usr/local/etc/profile.d/autojump.sh ] && . /usr/local/etc/profile.d/autojump.sh
 [ -f /opt/homebrew/etc/profile.d/autojump.sh ] && . /opt/homebrew/etc/profile.d/autojump.sh
 ZSHRC_BOTTOM
+
+  if ! zsh -n "${tmp_zshrc}"; then
+    rm -f "${tmp_zshrc}"
+    fail "Generated .zshrc has a syntax error. The existing .zshrc was left unchanged."
+  fi
+
   mv "${tmp_zshrc}" "${ZSHRC}"
 
   verify_zshrc_personalization
   ok ".zshrc has been configured for Powerlevel10k and plugins."
+}
+
+repair_zshrc() {
+  require_macos
+  warn "This will back up the current ~/.zshrc and regenerate a fixed Oh My Zsh configuration."
+  configure_zshrc
+  ok "Existing users are repaired. Open a new terminal or run: source ~/.zshrc"
 }
 
 verify_zshrc_personalization() {
@@ -531,7 +543,7 @@ run_p10k_configure() {
   configure_zshrc
   info "Starting Powerlevel10k configuration wizard."
   info "Choose the style you like in the prompts that follow."
-  zsh -ic 'p10k configure'
+  zsh -ic 'command -v p10k >/dev/null 2>&1 || source "${ZSH:-$HOME/.oh-my-zsh}/custom/themes/powerlevel10k/powerlevel10k.zsh-theme"; p10k configure'
 }
 
 full_install() {
@@ -571,25 +583,29 @@ show_status() {
   [[ -d "${P10K_DIR}" ]] && echo "Powerlevel10k: installed" || echo "Powerlevel10k: not installed"
   [[ -f "${FONT_DIR}/MesloLGS NF Regular.ttf" ]] && echo "MesloLGS NF: installed" || echo "MesloLGS NF: not installed"
   [[ -f "${ZSHRC}" ]] && echo ".zshrc: exists" || echo ".zshrc: missing"
+  if [[ -f "${ZSHRC}" ]]; then
+    zsh -n "${ZSHRC}" >/dev/null 2>&1 && echo ".zshrc syntax: ok" || echo ".zshrc syntax: broken, run './install-macos-ohmyzsh.sh repair-zshrc'"
+  fi
   printf '\n'
 }
 
 show_menu() {
   cat <<'MENU'
 
-macOS Oh My Zsh bootstrap
+macOS Oh My Zsh 一键初始化
 
-1) Full install: brew + node/npm + asar + autojump + Oh My Zsh + p10k + fonts + .zshrc
-2) Install Homebrew + Node.js/npm + @electron/asar + autojump
-3) Install/Update Oh My Zsh + Powerlevel10k + plugins
-4) Install MesloLGS Nerd Fonts
-5) Configure ~/.zshrc
-6) Run Powerlevel10k configuration wizard
-7) Show install status
-8) Repair Homebrew share permissions
-9) Run preflight checks
-10) Verify CN mirrors/proxies
-0) Exit
+1) 完整安装：brew + node/npm + asar + autojump + Oh My Zsh + p10k + 字体 + .zshrc
+2) 安装 Homebrew + Node.js/npm + @electron/asar + autojump
+3) 安装/更新 Oh My Zsh + Powerlevel10k + 插件
+4) 安装 MesloLGS Nerd Fonts
+5) 配置 ~/.zshrc
+6) 运行 Powerlevel10k 配置向导
+7) 查看安装状态
+8) 修复 Homebrew share 权限
+9) 运行预检
+10) 验证国内镜像/代理
+11) 修复已安装用户的 ~/.zshrc
+0) 退出
 
 MENU
 }
@@ -598,7 +614,7 @@ main_menu() {
   local choice
   while true; do
     show_menu
-    read -r -p "Choose an option: " choice
+    read -r -p "请选择菜单项: " choice
     case "${choice}" in
       1) full_install ;;
       2) install_node_and_asar ;;
@@ -610,8 +626,9 @@ main_menu() {
       8) repair_homebrew_share_permissions ;;
       9) preflight_checks ;;
       10) verify_cn_mirrors ;;
+      11) repair_zshrc ;;
       0) exit 0 ;;
-      *) warn "Unknown option: ${choice}" ;;
+      *) warn "未知菜单项: ${choice}" ;;
     esac
   done
 }
@@ -622,6 +639,7 @@ case "${1:-menu}" in
   ohmyzsh) install_oh_my_zsh ;;
   fonts) install_fonts ;;
   zshrc) configure_zshrc ;;
+  repair-zshrc) repair_zshrc ;;
   p10k) run_p10k_configure ;;
   brew-permissions) repair_homebrew_share_permissions ;;
   preflight) preflight_checks ;;
@@ -629,9 +647,9 @@ case "${1:-menu}" in
   status) show_status ;;
   menu) main_menu ;;
   -h|--help|help)
-    echo "Usage: $0 [menu|full|brew-node-asar|ohmyzsh|fonts|zshrc|p10k|brew-permissions|preflight|verify-cn-mirrors|status]"
+    echo "用法: $0 [menu|full|brew-node-asar|ohmyzsh|fonts|zshrc|repair-zshrc|p10k|brew-permissions|preflight|verify-cn-mirrors|status]"
     ;;
   *)
-    fail "Unknown command: $1. Run '$0 --help'."
+    fail "未知命令: $1。运行 '$0 --help' 查看帮助。"
     ;;
 esac
