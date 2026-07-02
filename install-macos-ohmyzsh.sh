@@ -6,6 +6,13 @@ OH_MY_ZSH_DIR="${HOME}/.oh-my-zsh"
 ZSHRC="${HOME}/.zshrc"
 FONT_DIR="${HOME}/Library/Fonts"
 P10K_DIR="${OH_MY_ZSH_DIR}/custom/themes/powerlevel10k"
+NETWORK_MODE="${NETWORK_MODE:-auto}"
+GITHUB_PROXY_PREFIX="${GITHUB_PROXY_PREFIX:-https://ghfast.top/}"
+NPM_REGISTRY_CN="${NPM_REGISTRY_CN:-https://registry.npmmirror.com}"
+HOMEBREW_BREW_GIT_REMOTE_CN="${HOMEBREW_BREW_GIT_REMOTE_CN:-https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/brew.git}"
+HOMEBREW_CORE_GIT_REMOTE_CN="${HOMEBREW_CORE_GIT_REMOTE_CN:-https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/homebrew-core.git}"
+HOMEBREW_API_DOMAIN_CN="${HOMEBREW_API_DOMAIN_CN:-https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api}"
+HOMEBREW_BOTTLE_DOMAIN_CN="${HOMEBREW_BOTTLE_DOMAIN_CN:-https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles}"
 
 info() { printf '\033[1;34m[INFO]\033[0m %s\n' "$*"; }
 ok() { printf '\033[1;32m[OK]\033[0m %s\n' "$*"; }
@@ -18,6 +25,90 @@ require_macos() {
 
 ensure_command() {
   command -v "$1" >/dev/null 2>&1 || fail "Missing command: $1"
+}
+
+cn_network_preferred() {
+  [[ "${NETWORK_MODE}" == "cn" ]]
+}
+
+cn_network_allowed() {
+  [[ "${NETWORK_MODE}" != "direct" ]]
+}
+
+sanitize_proxy_env() {
+  local var value host port
+  for var in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy; do
+    value="${!var:-}"
+    [[ -n "${value}" ]] || continue
+    if [[ "${value}" =~ ^[a-zA-Z0-9+.-]+://([^/:]+):([0-9]+) ]]; then
+      host="${BASH_REMATCH[1]}"
+      port="${BASH_REMATCH[2]}"
+      if [[ "${host}" == "127.0.0.1" || "${host}" == "localhost" || "${host}" == "::1" ]]; then
+        if ! (echo >/dev/tcp/"${host}"/"${port}") >/dev/null 2>&1; then
+          warn "Ignoring unavailable local proxy from ${var}: ${value}"
+          unset "${var}"
+        fi
+      fi
+    fi
+  done
+}
+
+github_proxy_url() {
+  local url="$1"
+  printf '%s%s' "${GITHUB_PROXY_PREFIX}" "${url}"
+}
+
+configure_cn_network() {
+  sanitize_proxy_env
+  cn_network_allowed || return 0
+
+  export HOMEBREW_BREW_GIT_REMOTE="${HOMEBREW_BREW_GIT_REMOTE_CN}"
+  export HOMEBREW_CORE_GIT_REMOTE="${HOMEBREW_CORE_GIT_REMOTE_CN}"
+  export HOMEBREW_API_DOMAIN="${HOMEBREW_API_DOMAIN_CN}"
+  export HOMEBREW_BOTTLE_DOMAIN="${HOMEBREW_BOTTLE_DOMAIN_CN}"
+}
+
+curl_head_ok() {
+  curl -fsIL --connect-timeout 8 --max-time 15 "$1" >/dev/null 2>&1
+}
+
+verify_cn_mirrors() {
+  require_macos
+  ensure_curl_available
+  sanitize_proxy_env
+
+  local failed=0
+  local raw_url
+  local font_url
+  raw_url="$(github_proxy_url "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh")"
+  font_url="$(github_proxy_url "https://github.com/romkatv/powerlevel10k-media/raw/master/MesloLGS%20NF%20Regular.ttf")"
+
+  info "Verifying GitHub raw proxy: ${raw_url}"
+  curl_head_ok "${raw_url}" && ok "GitHub raw proxy is reachable." || { warn "GitHub raw proxy failed."; failed=1; }
+
+  info "Verifying GitHub font proxy: ${font_url}"
+  curl_head_ok "${font_url}" && ok "GitHub file proxy is reachable." || { warn "GitHub file proxy failed."; failed=1; }
+
+  if git_is_usable; then
+    info "Verifying GitHub git proxy: $(github_proxy_url "https://github.com/ohmyzsh/ohmyzsh.git")"
+    git ls-remote "$(github_proxy_url "https://github.com/ohmyzsh/ohmyzsh.git")" HEAD >/dev/null 2>&1 && ok "GitHub git proxy is reachable." || { warn "GitHub git proxy failed."; failed=1; }
+  else
+    warn "Git is not available, skipping GitHub git proxy verification."
+  fi
+
+  info "Verifying npm mirror: ${NPM_REGISTRY_CN}"
+  curl_head_ok "${NPM_REGISTRY_CN}/@electron/asar" && ok "npm mirror is reachable." || { warn "npm mirror failed."; failed=1; }
+
+  info "Verifying Homebrew brew mirror: ${HOMEBREW_BREW_GIT_REMOTE_CN}"
+  curl_head_ok "${HOMEBREW_BREW_GIT_REMOTE_CN}/info/refs?service=git-upload-pack" && ok "Homebrew brew mirror is reachable." || { warn "Homebrew brew mirror failed."; failed=1; }
+
+  info "Verifying Homebrew core mirror: ${HOMEBREW_CORE_GIT_REMOTE_CN}"
+  curl_head_ok "${HOMEBREW_CORE_GIT_REMOTE_CN}/info/refs?service=git-upload-pack" && ok "Homebrew core mirror is reachable." || { warn "Homebrew core mirror failed."; failed=1; }
+
+  info "Verifying Homebrew API mirror: ${HOMEBREW_API_DOMAIN_CN}"
+  curl_head_ok "${HOMEBREW_API_DOMAIN_CN}/formula.jws.json" && ok "Homebrew API mirror is reachable." || { warn "Homebrew API mirror failed."; failed=1; }
+
+  [[ "${failed}" -eq 0 ]] || fail "One or more CN mirrors failed verification. Set NETWORK_MODE=direct to skip CN mirrors."
 }
 
 load_homebrew_env() {
@@ -41,6 +132,7 @@ git_is_usable() {
 preflight_checks() {
   require_macos
   ensure_curl_available
+  sanitize_proxy_env
   load_homebrew_env
 
   if command -v brew >/dev/null 2>&1; then
@@ -57,6 +149,12 @@ preflight_checks() {
   fi
 
   command -v zsh >/dev/null 2>&1 && ok "zsh is available: $(zsh --version)" || fail "zsh is required but was not found."
+  case "${NETWORK_MODE}" in
+    auto) info "Network mode is auto. Official sources are tried first; verified CN mirrors are used as fallback." ;;
+    cn) info "Network mode is cn. Verified CN mirrors are preferred." ;;
+    direct) info "Network mode is direct. CN mirrors are disabled." ;;
+    *) fail "Unknown NETWORK_MODE: ${NETWORK_MODE}. Use auto, cn, or direct." ;;
+  esac
 }
 
 confirm() {
@@ -69,21 +167,44 @@ confirm() {
 clone_or_update() {
   local repo="$1"
   local dest="$2"
+  local proxied_repo
+  proxied_repo="$(github_proxy_url "${repo}")"
 
   if [[ -d "${dest}/.git" ]]; then
     info "Updating ${dest}"
-    git -C "${dest}" pull --ff-only
+    if cn_network_preferred; then
+      git -C "${dest}" -c "url.${GITHUB_PROXY_PREFIX}https://github.com/.insteadOf=https://github.com/" pull --ff-only || git -C "${dest}" pull --ff-only
+    elif cn_network_allowed; then
+      git -C "${dest}" pull --ff-only || git -C "${dest}" -c "url.${GITHUB_PROXY_PREFIX}https://github.com/.insteadOf=https://github.com/" pull --ff-only
+    else
+      git -C "${dest}" pull --ff-only
+    fi
   elif [[ -e "${dest}" ]]; then
     warn "${dest} already exists and is not a git repository. Skipping."
   else
-    info "Cloning ${repo}"
-    git clone --depth=1 "${repo}" "${dest}"
+    if cn_network_preferred; then
+      info "Cloning ${repo} via GitHub proxy."
+      git clone --depth=1 "${proxied_repo}" "${dest}" || {
+        warn "GitHub proxy clone failed. Retrying direct clone: ${repo}"
+        git clone --depth=1 "${repo}" "${dest}"
+      }
+    elif cn_network_allowed; then
+      info "Cloning ${repo}"
+      git clone --depth=1 "${repo}" "${dest}" || {
+        warn "Direct clone failed. Retrying with verified GitHub proxy."
+        git clone --depth=1 "${proxied_repo}" "${dest}"
+      }
+    else
+      info "Cloning ${repo}"
+      git clone --depth=1 "${repo}" "${dest}"
+    fi
   fi
 }
 
 install_homebrew() {
   require_macos
   ensure_curl_available
+  sanitize_proxy_env
   load_homebrew_env
 
   if command -v brew >/dev/null 2>&1; then
@@ -93,7 +214,29 @@ install_homebrew() {
   fi
 
   info "Installing Homebrew. macOS may ask for your password or Command Line Tools confirmation."
-  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  local install_url="https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
+  local using_cn_installer=0
+  if cn_network_preferred; then
+    local proxied_install_url
+    proxied_install_url="$(github_proxy_url "${install_url}")"
+    if curl_head_ok "${proxied_install_url}"; then
+      install_url="${proxied_install_url}"
+      using_cn_installer=1
+      info "Using verified GitHub proxy for Homebrew installer."
+    else
+      warn "GitHub proxy for Homebrew installer is unavailable. Falling back to direct URL."
+    fi
+  elif cn_network_allowed && ! curl_head_ok "${install_url}"; then
+    local proxied_install_url
+    proxied_install_url="$(github_proxy_url "${install_url}")"
+    warn "Official Homebrew installer is not reachable. Trying verified GitHub proxy."
+    if curl_head_ok "${proxied_install_url}"; then
+      install_url="${proxied_install_url}"
+      using_cn_installer=1
+    fi
+  fi
+  [[ "${using_cn_installer}" -eq 1 ]] && configure_cn_network
+  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL "${install_url}")"
 
   load_homebrew_env
 
@@ -166,7 +309,22 @@ brew_install_if_missing() {
     ok "${formula} is already installed."
   else
     info "Installing ${formula} with Homebrew."
-    brew install "${formula}"
+    if cn_network_preferred; then
+      configure_cn_network
+      brew install "${formula}" || {
+        warn "Homebrew CN mirror install failed. Retrying with official Homebrew sources."
+        unset HOMEBREW_BREW_GIT_REMOTE HOMEBREW_CORE_GIT_REMOTE HOMEBREW_API_DOMAIN HOMEBREW_BOTTLE_DOMAIN
+        brew install "${formula}"
+      }
+    elif cn_network_allowed; then
+      brew install "${formula}" || {
+        warn "Official Homebrew install failed. Retrying with verified CN mirrors."
+        configure_cn_network
+        brew install "${formula}"
+      }
+    else
+      brew install "${formula}"
+    fi
   fi
 }
 
@@ -186,7 +344,19 @@ install_node_and_asar() {
   brew_install_if_missing node
   brew_install_if_missing autojump
   info "Installing @electron/asar globally."
-  npm install -g @electron/asar
+  if cn_network_preferred; then
+    npm install -g @electron/asar --registry="${NPM_REGISTRY_CN}" || {
+      warn "npm mirror install failed. Retrying with default npm registry."
+      npm install -g @electron/asar
+    }
+  elif cn_network_allowed; then
+    npm install -g @electron/asar || {
+      warn "Default npm registry failed. Retrying with verified npm mirror."
+      npm install -g @electron/asar --registry="${NPM_REGISTRY_CN}"
+    }
+  else
+    npm install -g @electron/asar
+  fi
   ok "Node.js, npm, @electron/asar, and autojump are ready."
 }
 
@@ -206,6 +376,7 @@ install_oh_my_zsh() {
 install_fonts() {
   require_macos
   ensure_curl_available
+  sanitize_proxy_env
   mkdir -p "${FONT_DIR}"
 
   local base="https://github.com/romkatv/powerlevel10k-media/raw/master"
@@ -223,7 +394,22 @@ install_fonts() {
       ok "Font already installed: ${font}"
     else
       info "Downloading font: ${font}"
-      curl -fL "${base}/${encoded}" -o "${target}"
+      local font_url="${base}/${encoded}"
+      local download_url="${font_url}"
+      if cn_network_preferred; then
+        download_url="$(github_proxy_url "${font_url}")"
+        curl -fL "${download_url}" -o "${target}" || {
+          warn "Font download through CN proxy failed. Retrying direct URL."
+          curl -fL "${font_url}" -o "${target}"
+        }
+      elif cn_network_allowed; then
+        curl -fL "${font_url}" -o "${target}" || {
+          warn "Direct font download failed. Retrying with verified GitHub proxy."
+          curl -fL "$(github_proxy_url "${font_url}")" -o "${target}"
+        }
+      else
+        curl -fL "${font_url}" -o "${target}"
+      fi
     fi
   done
 
@@ -366,8 +552,11 @@ full_install() {
 }
 
 show_status() {
+  sanitize_proxy_env
   load_homebrew_env
   printf '\nCurrent status:\n'
+  echo "Network mode: ${NETWORK_MODE}"
+  cn_network_allowed && echo "GitHub proxy prefix: ${GITHUB_PROXY_PREFIX}"
   command -v brew >/dev/null 2>&1 && brew --version | head -n 1 || echo "Homebrew: not installed"
   command -v node >/dev/null 2>&1 && node --version || echo "Node.js: not installed"
   command -v npm >/dev/null 2>&1 && npm --version || echo "npm: not installed"
@@ -399,6 +588,7 @@ macOS Oh My Zsh bootstrap
 7) Show install status
 8) Repair Homebrew share permissions
 9) Run preflight checks
+10) Verify CN mirrors/proxies
 0) Exit
 
 MENU
@@ -419,6 +609,7 @@ main_menu() {
       7) show_status ;;
       8) repair_homebrew_share_permissions ;;
       9) preflight_checks ;;
+      10) verify_cn_mirrors ;;
       0) exit 0 ;;
       *) warn "Unknown option: ${choice}" ;;
     esac
@@ -434,10 +625,11 @@ case "${1:-menu}" in
   p10k) run_p10k_configure ;;
   brew-permissions) repair_homebrew_share_permissions ;;
   preflight) preflight_checks ;;
+  verify-cn-mirrors) verify_cn_mirrors ;;
   status) show_status ;;
   menu) main_menu ;;
   -h|--help|help)
-    echo "Usage: $0 [menu|full|brew-node-asar|ohmyzsh|fonts|zshrc|p10k|brew-permissions|preflight|status]"
+    echo "Usage: $0 [menu|full|brew-node-asar|ohmyzsh|fonts|zshrc|p10k|brew-permissions|preflight|verify-cn-mirrors|status]"
     ;;
   *)
     fail "Unknown command: $1. Run '$0 --help'."

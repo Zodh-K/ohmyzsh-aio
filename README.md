@@ -6,6 +6,7 @@
 
 - 安装 Homebrew
 - 运行 macOS、curl、Homebrew、Git、zsh 预检
+- 自动检测网络可达性：默认官方来源优先，失败后使用已验证的国内镜像/代理
 - 检查并修复 Homebrew `share` 目录权限
 - 如果 Git 不可用，通过 Homebrew 自动安装 Git
 - 通过 Homebrew 安装 Node.js 和 npm
@@ -54,6 +55,7 @@ chmod +x install-macos-ohmyzsh.sh
 7) 查看安装状态
 8) 修复 Homebrew share 权限
 9) 运行预检
+10) 验证国内镜像/代理
 0) 退出
 ```
 
@@ -75,6 +77,7 @@ chmod +x install-macos-ohmyzsh.sh
 - 首次安装 Homebrew 时，macOS 可能会要求输入开机密码，或弹出 Command Line Tools 安装确认。
 - 如果 Homebrew 已经安装但还没进入 PATH，脚本会自动加载 `/opt/homebrew/bin/brew` 或 `/usr/local/bin/brew`。
 - 如果 Git 不可用，脚本会先确保 Homebrew 可用，再通过 Homebrew 安装 Git，然后继续克隆 Oh My Zsh 和插件仓库。
+- 默认 `NETWORK_MODE=auto`，会先使用官方来源，访问失败时才回退到国内镜像/代理。可用 `NETWORK_MODE=cn` 强制优先使用国内镜像，或用 `NETWORK_MODE=direct` 禁用国内镜像。
 - 脚本会在安装 Homebrew 后、执行 `brew install node` 前检查 Homebrew 的 `share` 目录是否可写。如果遇到 `/opt/homebrew/share` 或 `/usr/local/share` 权限问题，会提示修复；如果没有完成修复，脚本会先停止，避免继续执行后遇到 brew 权限报错。
 - 脚本会备份原来的 `~/.zshrc`，备份文件格式为 `~/.zshrc.backup.YYYYMMDDHHMMSS`。
 - 修改默认 shell 时会询问确认，并可能要求输入 macOS 密码。
@@ -90,6 +93,32 @@ p10k configure
 
 ```bash
 ./install-macos-ohmyzsh.sh brew-permissions
+```
+
+## 国内网络模式
+
+脚本内置并已验证这些国内路径：
+
+- GitHub 代理前缀：`https://ghfast.top/`
+- npm registry：`https://registry.npmmirror.com`
+- Homebrew brew/core/API/bottle 镜像：清华 TUNA 镜像
+
+验证当前环境是否可用：
+
+```bash
+./install-macos-ohmyzsh.sh verify-cn-mirrors
+```
+
+强制优先使用国内镜像：
+
+```bash
+NETWORK_MODE=cn ./install-macos-ohmyzsh.sh full
+```
+
+禁用国内镜像，只使用官方来源：
+
+```bash
+NETWORK_MODE=direct ./install-macos-ohmyzsh.sh full
 ```
 
 ## 参考来源
