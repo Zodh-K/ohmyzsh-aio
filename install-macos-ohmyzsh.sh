@@ -122,9 +122,11 @@ install_node_and_asar() {
   ensure_homebrew_share_writable
   info "Installing Node.js with Homebrew."
   brew install node
+  info "Installing autojump with Homebrew."
+  brew install autojump
   info "Installing @electron/asar globally."
   npm install -g @electron/asar
-  ok "Node.js, npm, and @electron/asar are ready."
+  ok "Node.js, npm, @electron/asar, and autojump are ready."
 }
 
 install_oh_my_zsh() {
@@ -181,7 +183,8 @@ configure_zshrc() {
   cp "${OH_MY_ZSH_DIR}/templates/zshrc.zsh-template" "${ZSHRC}"
 
   /usr/bin/perl -0pi -e 's/ZSH_THEME="[^"]*"/ZSH_THEME="powerlevel10k\/powerlevel10k"/' "${ZSHRC}"
-  /usr/bin/perl -0pi -e 's/plugins=\([^)]+\)/plugins=(\n  git\n  brew\n  npm\n  macos\n  zsh-autosuggestions\n  zsh-syntax-highlighting\n  zsh-completions\n)/s' "${ZSHRC}"
+  /usr/bin/perl -0pi -e 's/(ZSH_THEME="powerlevel10k\/powerlevel10k"\n)/$1\n# 指定终端标题\nDISABLE_AUTO_TITLE="true"\n/' "${ZSHRC}"
+  /usr/bin/perl -0pi -e 's/plugins=\([^)]+\)/plugins=(\n  git\n  autojump\n  zsh-autosuggestions\n  zsh-syntax-highlighting\n  zsh-completions\n)/s' "${ZSHRC}"
 
   local tmp_zshrc
   tmp_zshrc="$(mktemp)"
@@ -203,10 +206,59 @@ elif [[ -x /usr/local/bin/brew ]]; then
 fi
 
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
+
+# 加载补全
+if type brew &>/dev/null; then
+    FPATH=$(brew --prefix)/share/zsh-completions:$FPATH
+
+    autoload -Uz compinit
+    compinit
+fi
+
+# 快捷命令
+alias seconfig="open ~/.zshrc"
+alias reconfig="source ~/.zshrc"
+alias xf="sudo xattr -r -d com.apple.quarantine"
+alias yc="chflags hidden"
+alias qxyc="chflags nohidden"
+alias qm="sudo codesign --force --deep --sign -"
+
+# autojump配置
+[ -f /usr/local/etc/profile.d/autojump.sh ] && . /usr/local/etc/profile.d/autojump.sh
+[ -f /opt/homebrew/etc/profile.d/autojump.sh ] && . /opt/homebrew/etc/profile.d/autojump.sh
 ZSHRC_BOTTOM
   mv "${tmp_zshrc}" "${ZSHRC}"
 
+  verify_zshrc_personalization
   ok ".zshrc has been configured for Powerlevel10k and plugins."
+}
+
+verify_zshrc_personalization() {
+  local missing=0
+  local checks=(
+    'DISABLE_AUTO_TITLE="true"'
+    'FPATH=$(brew --prefix)/share/zsh-completions:$FPATH'
+    'plugins=('
+    'autojump'
+    'alias seconfig="open ~/.zshrc"'
+    'alias reconfig="source ~/.zshrc"'
+    'alias xf="sudo xattr -r -d com.apple.quarantine"'
+    'alias yc="chflags hidden"'
+    'alias qxyc="chflags nohidden"'
+    'alias qm="sudo codesign --force --deep --sign -"'
+    '/usr/local/etc/profile.d/autojump.sh'
+  )
+
+  for pattern in "${checks[@]}"; do
+    if grep -Fq "${pattern}" "${ZSHRC}"; then
+      ok ".zshrc contains: ${pattern}"
+    else
+      warn ".zshrc is missing: ${pattern}"
+      missing=1
+    fi
+  done
+
+  [[ "${missing}" -eq 0 ]] || fail ".zshrc personalization check failed."
 }
 
 set_default_shell() {
@@ -257,6 +309,7 @@ show_status() {
   command -v node >/dev/null 2>&1 && node --version || echo "Node.js: not installed"
   command -v npm >/dev/null 2>&1 && npm --version || echo "npm: not installed"
   command -v asar >/dev/null 2>&1 && asar --version || echo "@electron/asar: not installed"
+  command -v autojump >/dev/null 2>&1 && echo "autojump: installed" || echo "autojump: not installed"
   if command -v brew >/dev/null 2>&1; then
     local brew_share
     brew_share="$(brew --prefix)/share"
@@ -274,8 +327,8 @@ show_menu() {
 
 macOS Oh My Zsh bootstrap
 
-1) Full install: brew + node/npm + asar + Oh My Zsh + p10k + fonts + .zshrc
-2) Install Homebrew + Node.js/npm + @electron/asar
+1) Full install: brew + node/npm + asar + autojump + Oh My Zsh + p10k + fonts + .zshrc
+2) Install Homebrew + Node.js/npm + @electron/asar + autojump
 3) Install/Update Oh My Zsh + Powerlevel10k + plugins
 4) Install MesloLGS Nerd Fonts
 5) Configure ~/.zshrc

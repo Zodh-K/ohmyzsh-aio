@@ -8,12 +8,19 @@
 - 检查并修复 Homebrew `share` 目录权限
 - 通过 Homebrew 安装 Node.js 和 npm
 - 通过 npm 全局安装 `@electron/asar`
+- 通过 Homebrew 安装 `autojump`
 - 安装或更新 Oh My Zsh
 - 安装 Powerlevel10k 主题
 - 安装常用插件：
   - `zsh-autosuggestions`
   - `zsh-syntax-highlighting`
   - `zsh-completions`
+- 写入个性化 `.zshrc` 配置：
+  - 关闭终端自动标题
+  - 加载 Homebrew zsh 补全
+  - 启用 `git`、`autojump` 和 zsh 常用插件
+  - 添加常用快捷别名
+  - 加载 autojump 初始化脚本
 - 安装 Powerlevel10k 推荐字体 MesloLGS Nerd Font
 - 自动备份并生成 `~/.zshrc`
 - 引导进入 `p10k configure` 模板配置页面
@@ -37,7 +44,7 @@ chmod +x install-macos-ohmyzsh.sh
 
 ```text
 1) 完整安装
-2) 安装 Homebrew + Node.js/npm + @electron/asar
+2) 安装 Homebrew + Node.js/npm + @electron/asar + autojump
 3) 安装/更新 Oh My Zsh + Powerlevel10k + 插件
 4) 安装 MesloLGS Nerd Fonts
 5) 配置 ~/.zshrc
